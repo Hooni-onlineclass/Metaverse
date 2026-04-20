@@ -1,0 +1,92 @@
+
+services:
+  reverse-proxy:
+    image: traefik:v3.6.1
+    command:
+      - --log.level=DEBUG
+      - --providers.docker
+      - --providers.docker.exposedbydefault=false
+      - --entryPoints.web.address=:80
+    ports:
+      - "8081:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    networks:
+      - zep_network
+
+  play:
+    image: thecodingmachine/workadventure-play:master
+    environment:
+      - SECRET_KEY=your_secret_key
+      - MAP_STORAGE_API_TOKEN=supersecrettoken
+      - PUSHER_URL=https://zep.hooni.xyz/
+      - FRONT_URL=https://zep.hooni.xyz
+      - BACK_URL=http://back:8080
+      - INTERNAL_MAP_STORAGE_URL=http://map-storage:3000
+      - PUBLIC_MAP_STORAGE_URL=https://zep.hooni.xyz
+      - START_ROOM_URL=/_/global/zep.hooni.xyz/starter/map.json
+      - API_URL=back:50051
+      - UPLOADER_URL=
+      - ICON_URL=
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.play.rule=Host(`zep.hooni.xyz`) && !PathPrefix(`/starter`) && !PathPrefix(`/map-assets`)"
+      - "traefik.http.routers.play.priority=1"
+      - "traefik.http.routers.play.entrypoints=web"
+      - "traefik.http.routers.play.service=play"
+      - "traefik.http.services.play.loadbalancer.server.port=3000"
+      - "traefik.http.routers.play-ws.rule=Host(`zep.hooni.xyz`) && PathPrefix(`/ws`)"
+      - "traefik.http.routers.play-ws.priority=10"
+      - "traefik.http.routers.play-ws.entrypoints=web"
+      - "traefik.http.routers.play-ws.service=play-ws"
+      - "traefik.http.services.play-ws.loadbalancer.server.port=3001"
+
+    restart: always
+    networks:
+      - zep_network
+
+  back:
+    image: thecodingmachine/workadventure-back:master
+    environment:
+      - PLAY_URL=https://zep.hooni.xyz
+      - SECRET_KEY=your_secret_key
+      - REDIS_HOST=redis
+      - MAP_STORAGE_URL=map-storage:50053
+    restart: always
+    networks:
+      - zep_network
+
+  map-storage:
+    image: thecodingmachine/workadventure-map-storage:master
+    environment:
+      - MAP_STORAGE_API_TOKEN=supersecrettoken
+      - PUSHER_URL=https://zep.hooni.xyz/
+      - AUTH_MAP_STORAGE_URL=http://map-storage:3000
+      - API_URL=back:50051
+    volumes:
+      - map-storage-data:/maps
+      - ./maps/starter:/public/starter
+      - ./maps/assets:/public/map-assets
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.map-storage.rule=Host(`zep.hooni.xyz`) && (PathPrefix(`/starter`) || PathPrefix(`/map-assets`))"
+      - "traefik.http.routers.map-storage.priority=100"
+      - "traefik.http.services.map-storage.loadbalancer.server.port=3000"
+    restart: always
+    networks:
+      - zep_network
+
+  redis:
+    image: redis:6
+    restart: always
+    networks:
+      - zep_network
+
+volumes:
+  map-storage-data:
+
+networks:
+  zep_network:
+    external: true
